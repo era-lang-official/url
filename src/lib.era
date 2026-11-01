@@ -1,0 +1,274 @@
+fn url_parse_int(s: string) -> i64 {
+    let chars: Vec<char> = s.chars();
+    let mut num: i64 = 0;
+    let mut neg = false;
+    let mut i: usize = 0;
+    while i < chars.len() {
+        if i == 0 && chars[i] == '-' {
+            neg = true;
+            i += 1;
+            continue;
+        }
+        let code = chars[i] as i64;
+        if code >= 48 && code <= 57 {
+            num = (num * 10) + (code - 48);
+        }
+        i += 1;
+    }
+    if neg { return -num; }
+    return num;
+}
+// github.com/era-lang-official/url
+// RFC 3986 URL parsing, encoding, and query parameter engine
+
+fn url_str_find(s: string, sub: string) -> i64 {
+    let s_chars: Vec<char> = s.chars();
+    let sub_chars: Vec<char> = sub.chars();
+    if sub_chars.len() == 0 { return 0; }
+    if s_chars.len() < sub_chars.len() { return -1; }
+    let limit = (s_chars.len() - sub_chars.len()) + 1;
+    let mut i: usize = 0;
+    while i < limit {
+        let mut matched = true;
+        let mut j: usize = 0;
+        while j < sub_chars.len() {
+            if s_chars[i + j] != sub_chars[j] {
+                matched = false;
+                break;
+            }
+            j += 1;
+        }
+        if matched { return i as i64; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn url_str_slice(s: string, start: usize, end: usize) -> string {
+    let s_chars: Vec<char> = s.chars();
+    let mut sb = StringBuilder::new();
+    let mut i = start;
+    let limit = if end > s_chars.len() { s_chars.len() } else { end };
+    while i < limit {
+        sb.append(s_chars[i].to_string());
+        i += 1;
+    }
+    return sb.to_string();
+}
+
+pub struct QueryParam {
+    pub key: string,
+    pub val: string,
+}
+
+pub struct Url {
+    pub scheme: string,
+    pub host: string,
+    pub port: i64,
+    pub path: string,
+    pub raw_query: string,
+    pub fragment: string,
+    pub params: Vec<QueryParam>,
+}
+
+impl Url {
+    pub fn new() -> Url {
+        return Url {
+            scheme: "http".to_string(),
+            host: "localhost".to_string(),
+            port: 80,
+            path: "/".to_string(),
+            raw_query: "".to_string(),
+            fragment: "".to_string(),
+            params: Vec::<QueryParam>::new(),
+        };
+    }
+
+    pub fn parse(raw: string) -> Result<Url, string> {
+        return parse_url(raw);
+    }
+
+    pub fn get_param(&self, key: string) -> Option<string> {
+        let mut idx: usize = 0;
+        while idx < self.params.len() {
+            let p: QueryParam = self.params[idx].clone();
+            if p.key == key {
+                return Some(p.val.clone());
+            }
+            idx += 1;
+        }
+        return None;
+    }
+
+    pub fn stringify(&self) -> string {
+        let mut sb = StringBuilder::new();
+        sb.append(self.scheme.clone());
+        sb.append("://");
+        sb.append(self.host.clone());
+        if (self.scheme == "http" && self.port != 80 && self.port != 0) ||
+           (self.scheme == "https" && self.port != 443 && self.port != 0) ||
+           (self.scheme != "http" && self.scheme != "https" && self.port != 0) {
+            sb.append(f":{self.port}");
+        }
+        sb.append(self.path.clone());
+        if self.raw_query.len() > 0 {
+            sb.append("?");
+            sb.append(self.raw_query.clone());
+        }
+        if self.fragment.len() > 0 {
+            sb.append("#");
+            sb.append(self.fragment.clone());
+        }
+        return sb.to_string();
+    }
+}
+
+pub fn parse_query_params(query: string) -> Vec<QueryParam> {
+    let mut params = Vec::<QueryParam>::new();
+    if query.len() == 0 {
+        return params;
+    }
+    let pairs = query.split("&");
+    let mut idx: usize = 0;
+    while idx < pairs.len() {
+        let p: string = pairs[idx].clone();
+        if p.len() > 0 {
+            let eq_pos = url_str_find(p.clone(), "=".to_string());
+            if eq_pos >= 0 {
+                let k = url_str_slice(p.clone(), 0, eq_pos as usize);
+                let v = url_str_slice(p.clone(), (eq_pos + 1) as usize, p.len());
+                params.push(QueryParam {
+                    key: decode_uri_component(k),
+                    val: decode_uri_component(v),
+                });
+            } else {
+                params.push(QueryParam {
+                    key: decode_uri_component(p),
+                    val: "".to_string(),
+                });
+            }
+        }
+        idx += 1;
+    }
+    return params;
+}
+
+pub fn encode_uri_component(s: string) -> string {
+    let mut sb = StringBuilder::new();
+    let chars: Vec<char> = s.chars();
+    let hex_digits = "0123456789ABCDEF";
+    let mut idx: usize = 0;
+    while idx < chars.len() {
+        let c = chars[idx];
+        let code = c as i64;
+        let is_alphanum = (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+        let is_unreserved = is_alphanum || c == '-' || c == '_' || c == '.' || c == '~';
+        if is_unreserved {
+            sb.append(c.to_string());
+        } else {
+            sb.append("%");
+            let hi = (code >> 4) & 15;
+            let lo = code & 15;
+            sb.append(url_str_slice(hex_digits.to_string(), hi as usize, (hi + 1) as usize));
+            sb.append(url_str_slice(hex_digits.to_string(), lo as usize, (lo + 1) as usize));
+        }
+        idx += 1;
+    }
+    return sb.to_string();
+}
+
+fn hex_val(c: char) -> i64 {
+    let code = c as i64;
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }
+    if code >= 65 && code <= 70 {
+        return code - 65 + 10;
+    }
+    if code >= 97 && code <= 102 {
+        return code - 97 + 10;
+    }
+    return 0;
+}
+
+pub fn decode_uri_component(s: string) -> string {
+    let mut sb = StringBuilder::new();
+    let chars: Vec<char> = s.chars();
+    let mut idx: usize = 0;
+    while idx < chars.len() {
+        if chars[idx] == '%' && idx + 2 < chars.len() {
+            let h = hex_val(chars[idx + 1]);
+            let l = hex_val(chars[idx + 2]);
+            let code = (h << 4) | l;
+            sb.append((code as char).to_string());
+            idx += 3;
+        } else if chars[idx] == '+' {
+            sb.append(" ");
+            idx += 1;
+        } else {
+            sb.append(chars[idx].to_string());
+            idx += 1;
+        }
+    }
+    return sb.to_string();
+}
+
+pub fn parse_url(raw: string) -> Result<Url, string> {
+    if raw.len() == 0 {
+        return Err("Empty URL".to_string());
+    }
+
+    let mut remaining = raw;
+    let mut scheme = "http".to_string();
+    let scheme_end = url_str_find(remaining.clone(), "://".to_string());
+    if scheme_end >= 0 {
+        scheme = url_str_slice(remaining.clone(), 0, scheme_end as usize);
+        remaining = url_str_slice(remaining.clone(), (scheme_end + 3) as usize, remaining.len());
+    }
+
+    let mut fragment = "".to_string();
+    let frag_pos = url_str_find(remaining.clone(), "#".to_string());
+    if frag_pos >= 0 {
+        fragment = url_str_slice(remaining.clone(), (frag_pos + 1) as usize, remaining.len());
+        remaining = url_str_slice(remaining.clone(), 0, frag_pos as usize);
+    }
+
+    let mut raw_query = "".to_string();
+    let q_pos = url_str_find(remaining.clone(), "?".to_string());
+    if q_pos >= 0 {
+        raw_query = url_str_slice(remaining.clone(), (q_pos + 1) as usize, remaining.len());
+        remaining = url_str_slice(remaining.clone(), 0, q_pos as usize);
+    }
+
+    let slash_pos = url_str_find(remaining.clone(), "/".to_string());
+    let mut authority = remaining.clone();
+    let mut path = "/".to_string();
+    if slash_pos >= 0 {
+        authority = url_str_slice(remaining.clone(), 0, slash_pos as usize);
+        path = url_str_slice(remaining.clone(), slash_pos as usize, remaining.len());
+    }
+
+    let mut host = authority.clone();
+    let mut port: i64 = 80;
+    if scheme == "https" || scheme == "wss" {
+        port = 443;
+    }
+    let colon_pos = url_str_find(authority.clone(), ":".to_string());
+    if colon_pos >= 0 {
+        host = url_str_slice(authority.clone(), 0, colon_pos as usize);
+        let port_str = url_str_slice(authority.clone(), (colon_pos + 1) as usize, authority.len());
+        port = url_parse_int(port_str);
+    }
+
+    let params = parse_query_params(raw_query.clone());
+
+    return Ok(Url {
+        scheme,
+        host,
+        port,
+        path,
+        raw_query,
+        fragment,
+        params,
+    });
+}
